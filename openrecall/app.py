@@ -54,6 +54,13 @@ base_template = """
       max-width: 100%;
       height: auto;
     }
+    .transcription-container {
+      margin-top: 20px;
+      text-align: left;
+      padding: 10px;
+      background-color: #f8f9fa;
+      border-radius: 5px;
+    }
     .audio-controls {
       position: fixed;
       bottom: 20px;
@@ -139,27 +146,30 @@ def timeline():
     const timestampImage = document.getElementById('timestampImage');
     const transcriptionText = document.getElementById('transcriptionText');
 
+    function updateTranscription(timestamp) {
+      fetch(`/transcriptions/${timestamp}`)
+        .then(response => response.json())
+        .then(data => {
+          transcriptionText.innerHTML = '<h4>Transcriptions:</h4>';
+          data.transcriptions.forEach(transcription => {
+            transcriptionText.innerHTML += `<p>${transcription}</p>`;
+          });
+        });
+    }
+
     slider.addEventListener('input', function() {
       const reversedIndex = timestamps.length - 1 - slider.value;
       const timestamp = timestamps[reversedIndex];
       sliderValue.textContent = new Date(timestamp * 1000).toLocaleString();
       timestampImage.src = `/static/${timestamp}.webp`;
-      fetch(`/transcriptions/${timestamp}`)
-        .then(response => response.json())
-        .then(data => {
-          transcriptionText.innerHTML = data.transcriptions.join('<br>');
-        });
+      updateTranscription(timestamp);
     });
 
     // Initialize the slider with a default value
     slider.value = timestamps.length - 1;
     sliderValue.textContent = new Date(timestamps[0] * 1000).toLocaleString();
     timestampImage.src = `/static/${timestamps[0]}.webp`;
-    fetch(`/transcriptions/${timestamps[0]}`)
-      .then(response => response.json())
-      .then(data => {
-        transcriptionText.innerHTML = data.transcriptions.join('<br>');
-      });
+    updateTranscription(timestamps[0]);
   </script>
 {% else %}
   <div class="container">
@@ -202,13 +212,20 @@ def search():
                         <a href="#" data-toggle="modal" data-target="#modal-{{ loop.index0 }}">
                             <img src="/static/{{ entry['timestamp'] }}.webp" alt="Image" class="card-img-top">
                         </a>
+                        <div class="card-body">
+                            <p class="card-text">{{ entry['text'][:100] }}...</p>
+                        </div>
                     </div>
                 </div>
                 <div class="modal fade" id="modal-{{ loop.index0 }}" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
                     <div class="modal-dialog modal-xl" role="document" style="max-width: none; width: 100vw; height: 100vh; padding: 20px;">
                         <div class="modal-content" style="height: calc(100vh - 40px); width: calc(100vw - 40px); padding: 0;">
                             <div class="modal-body" style="padding: 0;">
-                                <img src="/static/{{ entry['timestamp'] }}.webp" alt="Image" style="width: 100%; height: 100%; object-fit: contain; margin: 0 auto;">
+                                <img src="/static/{{ entry['timestamp'] }}.webp" alt="Image" style="width: 100%; height: auto; object-fit: contain; margin: 0 auto;">
+                                <div class="transcription-container">
+                                    <h4>Transcription:</h4>
+                                    <p>{{ entry['text'] }}</p>
+                                </div>
                             </div>
                         </div>
                     </div>
