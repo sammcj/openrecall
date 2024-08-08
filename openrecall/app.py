@@ -1,16 +1,23 @@
 from threading import Thread
 
 import numpy as np
-from flask import Flask, render_template_string, request, send_from_directory
+from flask import Flask, render_template_string, request, send_from_directory, jsonify
 from jinja2 import BaseLoader
 
 from openrecall.config import appdata_folder, screenshots_path
-from openrecall.database import create_db, get_all_entries, get_timestamps
+from openrecall.database import (
+    create_db,
+    get_all_entries,
+    get_timestamps,
+    get_transcriptions,
+)
 from openrecall.nlp import cosine_similarity, get_embedding
 from openrecall.screenshot import record_screenshots_thread
 from openrecall.utils import human_readable_time, timestamp_to_human_readable
+from openrecall.audio_capture import start_audio_capture, stop_audio_capture
 
 app = Flask(__name__)
+
 
 app.jinja_env.filters["human_readable_time"] = human_readable_time
 app.jinja_env.filters["timestamp_to_human_readable"] = timestamp_to_human_readable
@@ -47,6 +54,11 @@ base_template = """
       max-width: 100%;
       height: auto;
     }
+    .audio-controls {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+    }
   </style>
 </head>
 <body>
@@ -64,11 +76,29 @@ base_template = """
 
 {% endblock %}
 
+<div class="audio-controls">
+  <button id="startAudio" class="btn btn-primary">Start Audio Capture</button>
+  <button id="stopAudio" class="btn btn-danger">Stop Audio Capture</button>
+</div>
+
   <!-- Bootstrap and jQuery JS -->
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-  
+
+  <script>
+    document.getElementById('startAudio').addEventListener('click', function() {
+      fetch('/start_audio', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => console.log(data));
+    });
+
+    document.getElementById('stopAudio').addEventListener('click', function() {
+      fetch('/stop_audio', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => console.log(data));
+    });
+  </script>
 </body>
 </html>
 """
@@ -86,7 +116,6 @@ app.jinja_env.loader = StringLoader()
 
 @app.route("/")
 def timeline():
-    # connect to db
     timestamps = get_timestamps()
     return render_template_string(
         """
@@ -101,24 +130,36 @@ def timeline():
     <div class="image-container">
       <img id="timestampImage" src="/static/{{timestamps[0]}}.webp" alt="Image for timestamp">
     </div>
+    <div class="transcription-container" id="transcriptionText"></div>
   </div>
   <script>
     const timestamps = {{ timestamps|tojson }};
     const slider = document.getElementById('discreteSlider');
     const sliderValue = document.getElementById('sliderValue');
     const timestampImage = document.getElementById('timestampImage');
+    const transcriptionText = document.getElementById('transcriptionText');
 
     slider.addEventListener('input', function() {
       const reversedIndex = timestamps.length - 1 - slider.value;
       const timestamp = timestamps[reversedIndex];
-      sliderValue.textContent = new Date(timestamp * 1000).toLocaleString();  // Convert to human-readable format
+      sliderValue.textContent = new Date(timestamp * 1000).toLocaleString();
       timestampImage.src = `/static/${timestamp}.webp`;
+      fetch(`/transcriptions/${timestamp}`)
+        .then(response => response.json())
+        .then(data => {
+          transcriptionText.innerHTML = data.transcriptions.join('<br>');
+        });
     });
 
     // Initialize the slider with a default value
     slider.value = timestamps.length - 1;
-    sliderValue.textContent = new Date(timestamps[0] * 1000).toLocaleString();  // Convert to human-readable format
+    sliderValue.textContent = new Date(timestamps[0] * 1000).toLocaleString();
     timestampImage.src = `/static/${timestamps[0]}.webp`;
+    fetch(`/transcriptions/${timestamps[0]}`)
+      .then(response => response.json())
+      .then(data => {
+        transcriptionText.innerHTML = data.transcriptions.join('<br>');
+      });
   </script>
 {% else %}
   <div class="container">
@@ -133,13 +174,17 @@ def timeline():
     )
 
 
+@app.route("/transcriptions/<int:timestamp>")
+def get_transcriptions_for_timestamp(timestamp):
+    transcriptions = get_transcriptions(timestamp)
+    return jsonify({"transcriptions": transcriptions})
+
+
 @app.route("/search")
 def search():
     q = request.args.get("q")
     entries = get_all_entries()
-    embeddings = [
-        np.frombuffer(entry.embedding, dtype=np.float64) for entry in entries
-    ]
+    embeddings = [np.frombuffer(entry.embedding, dtype=np.float64) for entry in entries]
     query_embedding = get_embedding(q)
     similarities = [cosine_similarity(query_embedding, emb) for emb in embeddings]
     indices = np.argsort(similarities)[::-1]
@@ -182,6 +227,18 @@ def serve_image(filename):
     return send_from_directory(screenshots_path, filename)
 
 
+@app.route("/start_audio", methods=["POST"])
+def start_audio():
+    start_audio_capture()
+    return jsonify({"status": "Audio capture started"})
+
+
+@app.route("/stop_audio", methods=["POST"])
+def stop_audio():
+    stop_audio_capture()
+    return jsonify({"status": "Audio capture stopped"})
+
+
 if __name__ == "__main__":
     create_db()
 
@@ -190,5 +247,9 @@ if __name__ == "__main__":
     # Start the thread to record screenshots
     t = Thread(target=record_screenshots_thread)
     t.start()
+
+    # Start the audio capture thread
+    audio_thread = Thread(target=start_audio_capture)
+    audio_thread.start()
 
     app.run(port=8082)

@@ -6,7 +6,6 @@ from openrecall.config import db_path
 
 Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding"])
 
-
 def create_db() -> None:
     with sqlite3.connect(db_path) as conn:
         c = conn.cursor()
@@ -16,13 +15,11 @@ def create_db() -> None:
         )
         conn.commit()
 
-
 def get_all_entries() -> List[Entry]:
     with sqlite3.connect(db_path) as conn:
         c = conn.cursor()
         results = c.execute("SELECT * FROM entries").fetchall()
         return [Entry(*result) for result in results]
-
 
 def get_timestamps() -> List[int]:
     with sqlite3.connect(db_path) as conn:
@@ -32,13 +29,11 @@ def get_timestamps() -> List[int]:
         ).fetchall()
         return [result[0] for result in results]
 
-
 def insert_entry(
     text: str, timestamp: int, embedding: Any, app: str, title: str
 ) -> None:
     embedding_bytes = embedding.tobytes()
     try:
-
         with sqlite3.connect(db_path) as conn:
             c = conn.cursor()
             c.execute(
@@ -48,3 +43,16 @@ def insert_entry(
             conn.commit()
     except sqlite3.OperationalError as e:
         print("Error inserting entry:", e)
+
+
+def get_transcriptions(timestamp: int) -> List[str]:
+    with sqlite3.connect(db_path) as conn:
+        c = conn.cursor()
+        results = c.execute(
+            "SELECT text FROM entries WHERE app='AudioTranscription' AND timestamp >= ? AND timestamp < ? ORDER BY timestamp",
+            (
+                timestamp,
+                timestamp + 3,
+            ),  # Assuming 3-second intervals between screenshots
+        ).fetchall()
+        return [result[0] for result in results]
